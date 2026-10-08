@@ -131,15 +131,9 @@ def load_forecast():
 @st.cache_resource
 def load_recommendations():
 
-    retail_data = pd.read_csv(
-        "data/processed/retail_features.csv",
-        low_memory=False
-    )
-
-    customer_segments = pd.read_csv(
-        "data/processed/customer_segments.csv",
-        low_memory=False
-    )
+    # Reuse the already cached datasets instead of
+    # reading the 120+ MB CSV again.
+    retail_data, customer_segments = load_data()
 
     return build_recommendation_engine(
         retail_data=retail_data,
