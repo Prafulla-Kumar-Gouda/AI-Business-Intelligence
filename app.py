@@ -1,1673 +1,2959 @@
-import streamlit as st
+"""
+Universal AI Business Intelligence - V2
+
+----------------------------------------
+
+Universal Business Intelligence Platform
+
+
+Features:
+
+- CSV / XLSX / XLS upload
+
+- Up to 10 GB configured upload limit
+
+- Fast dataset preview
+
+- Automatic business column detection
+
+- Data cleaning
+
+- Dataset health overview
+
+- KPI analytics
+
+- Monthly revenue
+
+- Top products
+
+- Top customers
+
+- Revenue by country
+
+- Customer segmentation
+
+- Session-based caching
+
+- Floating Analysis Tips button
+"""
+
+
+from pathlib import Path
+
+import time
+
+
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import requests
-from recommendation_engine import build_recommendation_engine
+
+import streamlit as st
+
+
+from modules.data_loader import (
+    load_uploaded_file,
+    preview_uploaded_file,
+    get_dataset_summary,
+    detect_columns,
+)
+
+
+from modules.data_cleaner import (
+    clean_dataset,
+)
+
+
+from modules.analytics import (
+    calculate_kpis,
+    monthly_revenue,
+    top_products,
+    top_customers,
+    revenue_by_country,
+)
+
+
+from modules.segmentation import (
+    segment_customers,
+    segment_summary,
+    segment_insights,
+)
+from modules.forecasting import (
+    forecast_sales,
+    forecast_summary,
+    forecast_accuracy,
+    forecast_insights,
+)
+
+from modules.ai_insights import (
+    generate_ai_insights,
+    generate_business_actions,
+    generate_customer_insights,
+    generate_forecast_insights,
+    generate_product_insights,
+    generate_revenue_insights,
+)
+
+from modules.recommendations import (
+    customer_recommendations,
+    frequently_bought_together,
+    product_strategy_recommendations,
+    recommendation_summary,
+   
+)
+
 # ============================================================
 # PAGE CONFIGURATION
 # ============================================================
+
+
 st.set_page_config(
-    page_title="AI Business Intelligence",
+    page_title="Universal AI Business Intelligence",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed",
 )
+
+
 # ============================================================
-# CURRENCY CONFIGURATION
+# CUSTOM CSS
 # ============================================================
-CURRENCIES = {
-    "GBP — British Pound (£)": ("GBP", "£"),
-    "INR — Indian Rupee (₹)": ("INR", "₹"),
-    "USD — US Dollar ($)": ("USD", "$"),
-    "EUR — Euro (€)": ("EUR", "€"),
-    "JPY — Japanese Yen (¥)": ("JPY", "¥"),
-    "AED — UAE Dirham (د.إ)": ("AED", "د.إ"),
-    "AUD — Australian Dollar (A$)": ("AUD", "A$"),
-    "CAD — Canadian Dollar (C$)": ("CAD", "C$"),
-    "SGD — Singapore Dollar (S$)": ("SGD", "S$")
-}
-# ============================================================
-# LOAD MAIN DATA
-# ============================================================
-@st.cache_data(show_spinner=False)
-def load_data():
-    df = pd.read_csv(
-        "data/processed/retail_features.csv",
-        usecols=[
-            "Invoice", "StockCode", "Description", "Quantity",
-            "InvoiceDate", "Revenue", "Customer ID", "Country"
-        ],
-        dtype={
-            "Invoice": "string",
-            "StockCode": "string",
-            "Description": "string",
-            "Quantity": "float64",
-            "Revenue": "float64",
-            "Customer ID": "float64",
-            "Country": "string"
-        },
-        parse_dates=["InvoiceDate"],
-        low_memory=False
+
+
+def load_custom_css():
+
+    css_path = (
+        Path(__file__).resolve().parent
+        / "assets"
+        / "style.css"
     )
-    segments = pd.read_csv(
-        "data/processed/customer_segments.csv",
-        usecols=["Customer ID", "Recency", "Frequency", "Monetary", "Segment"],
-        dtype={
-            "Customer ID": "float64",
-            "Recency": "float64",
-            "Frequency": "float64",
-            "Monetary": "float64",
-            "Segment": "string"
-        },
-        low_memory=False
-    )
-    df["InvoiceDate"] = pd.to_datetime(
-        df["InvoiceDate"],
-        errors="coerce"
-    )
-    df["Revenue"] = pd.to_numeric(
-        df["Revenue"],
-        errors="coerce"
-    )
-    df["Quantity"] = pd.to_numeric(
-        df["Quantity"],
-        errors="coerce"
-    )
-    df["Customer ID"] = pd.to_numeric(
-        df["Customer ID"],
-        errors="coerce"
-    )
-    segments["Customer ID"] = pd.to_numeric(
-        segments["Customer ID"],
-        errors="coerce"
-    )
-    return df, segments
-# ============================================================
-# LOAD FORECAST
-# ============================================================
-@st.cache_data(show_spinner=False)
-def load_forecast():
-    try:
-        forecast = pd.read_csv(
-            "data/processed/sales_forecast.csv",
-            low_memory=False
+
+    if css_path.exists():
+
+        with open(
+            css_path,
+            "r",
+            encoding="utf-8",
+        ) as css_file:
+
+            css = css_file.read()
+
+        st.markdown(
+            f"<style>{css}</style>",
+            unsafe_allow_html=True,
         )
-        forecast["Month"] = pd.to_datetime(
-            forecast["Month"],
-            errors="coerce"
-        )
-        forecast["Forecast_Revenue"] = pd.to_numeric(
-            forecast["Forecast_Revenue"],
-            errors="coerce"
-        )
-        forecast = forecast.dropna(
-            subset=[
-                "Month",
-                "Forecast_Revenue"
-            ]
-        )
-        return forecast
-    except Exception:
-        return pd.DataFrame(
-            columns=[
-                "Month",
-                "Forecast_Revenue"
-            ]
-        )
+
+
+load_custom_css()
+
+
 # ============================================================
-# LOAD RECOMMENDATION ENGINE
+# FUNCTIONAL FLOATING ANALYSIS TIPS STYLES
 # ============================================================
-@st.cache_resource(show_spinner=False)
-def load_recommendations():
-    # Reuse the already cached datasets instead of
-    # reading the 120+ MB CSV again.
-    retail_data, customer_segments = load_data()
-    return build_recommendation_engine(
-        retail_data=retail_data,
-        customer_segments=customer_segments,
-        top_n=10
-    )
-# ============================================================
-# EXCHANGE RATE
-# ============================================================
-@st.cache_data(ttl=3600)
-def get_exchange_rate(currency):
-    if currency == "GBP":
-        return 1.0, "Original GBP data"
-    url = (
-        "https://api.frankfurter.dev/v2/rate/gbp/"
-        + currency
-    )
-    try:
-        response = requests.get(
-            url,
-            timeout=5
-        )
-        response.raise_for_status()
-        data = response.json()
-        return (
-            float(data["rate"]),
-            data.get("date", "latest")
-        )
-    except Exception:
-        return None, None
-# ============================================================
-# LOAD EVERYTHING
-# ============================================================
-with st.spinner(
-    "Loading AI Business Intelligence..."
-):
-    df, segments = load_data()
-    forecast_df = load_forecast()
-with st.spinner(
-    "Preparing recommendation intelligence..."
-):
-    recommendation_results = load_recommendations()
-# ============================================================
-# SIDEBAR
-# ============================================================
-st.sidebar.title(
-    "🎛️ Dashboard Controls"
-)
-# ============================================================
-# THEME
-# ============================================================
-st.sidebar.markdown(
-    "### 🎨 Appearance"
-)
-theme = st.sidebar.radio(
-    "Choose Theme",
-    [
-        "🌙 Dark Mode",
-        "☀️ Light Mode"
-    ],
-    index=0
-)
-# ============================================================
-# PLOTLY THEME
-# ============================================================
-if theme == "🌙 Dark Mode":
-    plot_bg = "#0e1117"
-    plot_paper = "#0e1117"
-    plot_text = "#ffffff"
-    plot_grid = "#30363d"
-    plot_template = "plotly_dark"
-    background = "#0e1117"
-    card = "#161b22"
-    border = "#30363d"
-    text = "#ffffff"
-    muted = "#9aa4b2"
-else:
-    plot_bg = "#ffffff"
-    plot_paper = "#ffffff"
-    plot_text = "#1f2937"
-    plot_grid = "#d9dee7"
-    plot_template = "plotly_white"
-    background = "#f5f7fa"
-    card = "#ffffff"
-    border = "#d9dee7"
-    text = "#1f2937"
-    muted = "#5f6b7a"
-def apply_plotly_theme(fig):
-    fig.update_layout(
-        template="none",
-        plot_bgcolor=plot_bg,
-        paper_bgcolor=plot_paper,
-        font=dict(
-            color=plot_text
-        ),
-        title=dict(
-            font=dict(
-                color=plot_text
-            )
-        ),
-        legend=dict(
-            font=dict(
-                color=plot_text
-            )
-        ),
-        hoverlabel=dict(
-            font=dict(color=plot_text),
-            bgcolor=card,
-            bordercolor=border
-        ),
-        xaxis=dict(
-            color=plot_text,
-            title_font=dict(
-                color=plot_text
-            ),
-            tickfont=dict(
-                color=plot_text
-            ),
-            gridcolor=plot_grid
-        ),
-        yaxis=dict(
-            color=plot_text,
-            title_font=dict(
-                color=plot_text
-            ),
-            tickfont=dict(
-                color=plot_text
-            ),
-            gridcolor=plot_grid
-        )
-    )
-    return fig
-# ============================================================
-# THEME CSS
-# ============================================================
+
+
 st.markdown(
-    f"""
+    """
     <style>
-    .stApp {{
-        background-color: {background};
-        color: {text};
-    }}
-    [data-testid="stAppViewContainer"] {{
-        background-color: {background};
-    }}
-    [data-testid="stHeader"] {{
-        background-color: {background};
-    }}
-    .block-container {{
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
-    }}
-    h1, h2, h3, h4, h5, h6 {{
-        color: {text} !important;
-    }}
-    [data-testid="stMetric"] {{
-        background-color: {card};
-        border: 1px solid {border};
-        border-radius: 12px;
-        padding: 18px;
-    }}
-    [data-testid="stMetricLabel"] {{
-        color: {muted} !important;
-    }}
-    [data-testid="stMetricValue"] {{
-        color: {text} !important;
-    }}
+
+    /* ========================================================
+       FLOATING ANALYSIS TIPS BUTTON
+       ======================================================== */
+
+    .st-key-analysis_tips_button_container {
+        position: fixed !important;
+        right: 24px !important;
+        bottom: 24px !important;
+        z-index: 999999 !important;
+        width: auto !important;
+    }
+
+
+    .st-key-analysis_tips_button_container button {
+        border-radius: 999px !important;
+
+        background: linear-gradient(
+            135deg,
+            #5b5ff7,
+            #16b8d4
+        ) !important;
+
+        color: white !important;
+
+        border: none !important;
+
+        padding: 10px 18px !important;
+
+        font-size: 14px !important;
+        font-weight: 700 !important;
+
+        box-shadow:
+            0 8px 25px rgba(0, 0, 0, 0.35) !important;
+
+        transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease !important;
+    }
+
+
+    .st-key-analysis_tips_button_container button:hover {
+        transform: translateY(-3px) !important;
+
+        box-shadow:
+            0 12px 30px rgba(0, 0, 0, 0.45) !important;
+
+        border: none !important;
+    }
+
+
+    /* ========================================================
+       FLOATING ANALYSIS TIPS PANEL
+       ======================================================== */
+
+    .st-key-analysis_tips_panel {
+        position: fixed !important;
+
+        right: 24px !important;
+        bottom: 82px !important;
+
+        width: 340px !important;
+        max-height: 70vh !important;
+
+        overflow-y: auto !important;
+
+        z-index: 999998 !important;
+
+        padding: 20px !important;
+
+        border-radius: 18px !important;
+
+        background: rgba(20, 24, 38, 0.97) !important;
+
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+
+        box-shadow:
+            0 15px 45px rgba(0, 0, 0, 0.45) !important;
+
+        backdrop-filter: blur(16px) !important;
+    }
+
+
+    .st-key-analysis_tips_panel h3 {
+        margin-top: 0 !important;
+    }
+
+
+    /* ========================================================
+       SEGMENTATION CARDS
+       ======================================================== */
+
+    .segment-insight {
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+    }
+
+
+    /* ========================================================
+       MOBILE
+       ======================================================== */
+
+    @media (max-width: 768px) {
+
+        .st-key-analysis_tips_button_container {
+            right: 14px !important;
+            bottom: 14px !important;
+        }
+
+
+        .st-key-analysis_tips_panel {
+            right: 14px !important;
+            bottom: 72px !important;
+
+            width: calc(100vw - 28px) !important;
+
+            max-height: 65vh !important;
+        }
+
+    }
+
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
+
+
 # ============================================================
-# CURRENCY
+# SESSION STATE
 # ============================================================
-st.sidebar.markdown(
-    "### 💱 Currency"
-)
-currency_name = st.sidebar.selectbox(
-    "Display Currency",
-    list(CURRENCIES.keys()),
-    index=0
-)
-currency_code, currency_symbol = CURRENCIES[
-    currency_name
-]
-exchange_rate, rate_date = get_exchange_rate(
-    currency_code
-)
-if exchange_rate is None:
-    st.sidebar.warning(
-        "Live exchange rate unavailable. "
-        "Showing original GBP values."
-    )
-    exchange_rate = 1.0
-    currency_code = "GBP"
-    currency_symbol = "£"
-else:
-    if currency_code != "GBP":
-        st.sidebar.success(
-            f"1 GBP ≈ "
-            f"{exchange_rate:,.4f} "
-            f"{currency_code}"
-        )
-        st.sidebar.caption(
-            f"Rate date: {rate_date}"
-        )
+
+
+session_defaults = {
+
+    "analysis_completed": False,
+
+    "raw_data": None,
+
+    "cleaned_data": None,
+
+    "detected_columns": {},
+
+    "cleaning_report": None,
+
+    "file_signature": None,
+
+    "preview_signature": None,
+
+    "preview_result": None,
+
+    "analysis_results": None,
+
+    "analysis_seconds": None,
+
+    "tips_open": False,
+}
+
+
+for key, value in session_defaults.items():
+
+    if key not in st.session_state:
+
+        st.session_state[key] = value
+
+
 # ============================================================
-# COUNTRY
+# HELPER FUNCTIONS
 # ============================================================
-st.sidebar.markdown(
-    "### 🌍 Country"
-)
-countries = sorted(
-    df["Country"]
-    .dropna()
-    .unique()
-    .tolist()
-)
-selected_country = st.sidebar.selectbox(
-    "Select Country",
-    ["All Countries"] + countries
-)
-# ============================================================
-# DATE FILTER
-# ============================================================
-st.sidebar.markdown(
-    "### 📅 Date Filter"
-)
-min_date = (
-    df["InvoiceDate"]
-    .min()
-    .date()
-)
-max_date = (
-    df["InvoiceDate"]
-    .max()
-    .date()
-)
-date_mode = st.sidebar.selectbox(
-    "Choose period",
-    [
-        "All Time",
-        "Last 30 Days",
-        "Last 90 Days",
-        "Last 6 Months",
-        "Last 12 Months",
-        "Custom Range"
-    ]
-)
-start_date = min_date
-end_date = max_date
-if date_mode == "Last 30 Days":
-    start_date = (
-        pd.Timestamp(max_date)
-        - pd.Timedelta(days=30)
-    ).date()
-elif date_mode == "Last 90 Days":
-    start_date = (
-        pd.Timestamp(max_date)
-        - pd.Timedelta(days=90)
-    ).date()
-elif date_mode == "Last 6 Months":
-    start_date = (
-        pd.Timestamp(max_date)
-        - pd.DateOffset(months=6)
-    ).date()
-elif date_mode == "Last 12 Months":
-    start_date = (
-        pd.Timestamp(max_date)
-        - pd.DateOffset(months=12)
-    ).date()
-elif date_mode == "Custom Range":
-    start_date = st.sidebar.date_input(
-        "From",
-        value=min_date,
-        min_value=min_date,
-        max_value=max_date
-    )
-    end_date = st.sidebar.date_input(
-        "To",
-        value=max_date,
-        min_value=min_date,
-        max_value=max_date
-    )
-if start_date > end_date:
-    st.sidebar.error(
-        "Start date cannot be after end date."
-    )
-    st.stop()
-# ============================================================
-# FILTER DATA
-# ============================================================
-filter_mask = pd.Series(True, index=df.index)
-if selected_country != "All Countries":
-    filter_mask &= df["Country"].eq(selected_country)
-start_timestamp = pd.Timestamp(start_date)
-end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1)
-filter_mask &= df["InvoiceDate"].ge(start_timestamp)
-filter_mask &= df["InvoiceDate"].lt(end_timestamp)
-filtered_df = df.loc[filter_mask].copy()
-if filtered_df.empty:
-    st.warning(
-        "No data exists for the selected filters."
-    )
-    st.stop()
-filtered_df = filtered_df.copy()
-filtered_df["DisplayRevenue"] = (
-    filtered_df["Revenue"]
-    * exchange_rate
-)
-# ============================================================
-# HEADER
-# ============================================================
-st.title(
-    "📊 AI Business Intelligence"
-)
-st.subheader(
-    "Retail Sales & Customer Intelligence Platform"
-)
-st.caption(
-    "Interactive business analytics powered by "
-    "Python, Pandas, Plotly and Machine Learning."
-)
-st.info(
-    f"📅 Showing: {start_date} → {end_date} | "
-    f"🌍 Country: {selected_country} | "
-    f"💱 Currency: {currency_code} | "
-    f"🎨 Theme: "
-    f"{'Dark' if theme == '🌙 Dark Mode' else 'Light'}"
-)
-# ============================================================
-# KPI SECTION
-# ============================================================
-total_revenue = (
-    filtered_df["DisplayRevenue"].sum()
-)
-total_orders = (
-    filtered_df["Invoice"].nunique()
-)
-total_customers = (
-    filtered_df["Customer ID"].nunique()
-)
-total_products = (
-    filtered_df["StockCode"].nunique()
-)
-average_order_value = (
-    total_revenue / total_orders
-    if total_orders > 0
-    else 0
-)
-average_customer_value = (
-    total_revenue / total_customers
-    if total_customers > 0
-    else 0
-)
-st.header(
-    "📊 Key Performance Indicators"
-)
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric(
-        "💰 Total Revenue",
-        f"{currency_symbol}"
-        f"{total_revenue:,.0f}"
-    )
-with col2:
-    st.metric(
-        "🧾 Total Orders",
-        f"{total_orders:,}"
-    )
-with col3:
-    st.metric(
-        "👥 Customers",
-        f"{total_customers:,}"
-    )
-with col4:
-    st.metric(
-        "📦 Products",
-        f"{total_products:,}"
-    )
-st.header(
-    "📌 Additional Metrics"
-)
-metric1, metric2, metric3 = st.columns(3)
-with metric1:
-    st.metric(
-        "Average Order Value",
-        f"{currency_symbol}"
-        f"{average_order_value:,.2f}"
-    )
-with metric2:
-    st.metric(
-        "Average Customer Value",
-        f"{currency_symbol}"
-        f"{average_customer_value:,.2f}"
-    )
-with metric3:
-    st.metric(
-        "Countries",
-        f"{filtered_df['Country'].nunique():,}"
-    )
-# ============================================================
-# REVENUE PERFORMANCE
-# ============================================================
-st.divider()
-st.header(
-    "📈 Revenue Performance"
-)
-monthly_revenue = (
-    filtered_df
-    .groupby(
-        filtered_df["InvoiceDate"].dt.to_period("M")
-    )["DisplayRevenue"]
-    .sum()
-    .reset_index()
-)
-monthly_revenue["InvoiceDate"] = (
-    monthly_revenue["InvoiceDate"]
-    .astype(str)
-)
-fig_revenue = px.line(
-    monthly_revenue,
-    x="InvoiceDate",
-    y="DisplayRevenue",
-    markers=True,
-    title=f"Monthly Revenue ({currency_code})",
-    template=plot_template
-)
-fig_revenue.update_layout(
-    xaxis_title="Month",
-    yaxis_title=f"Revenue ({currency_code})",
-    hovermode="x unified"
-)
-apply_plotly_theme(fig_revenue)
-st.plotly_chart(
-    fig_revenue,
-    width="stretch"
-)
-# ============================================================
-# COUNTRY + PRODUCT
-# ============================================================
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader(
-        "🌍 Revenue by Country"
-    )
-    country_revenue = (
-        filtered_df
-        .groupby("Country")["DisplayRevenue"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    fig_country = px.bar(
-        country_revenue,
-        x="DisplayRevenue",
-        y="Country",
-        orientation="h",
-        title=f"Top 10 Countries ({currency_code})",
-        template=plot_template
-    )
-    fig_country.update_layout(
-        yaxis={
-            "categoryorder": "total ascending"
-        }
-    )
-    apply_plotly_theme(fig_country)
-    st.plotly_chart(
-        fig_country,
-        width="stretch"
-    )
-with col2:
-    st.subheader(
-        "🛍️ Top Products"
-    )
-    top_products_chart = (
-        filtered_df
-        .groupby("Description")["Quantity"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(10)
-        .reset_index()
-    )
-    fig_products = px.bar(
-        top_products_chart,
-        x="Quantity",
-        y="Description",
-        orientation="h",
-        title="Top 10 Products by Quantity",
-        template=plot_template
-    )
-    fig_products.update_layout(
-        yaxis={
-            "categoryorder": "total ascending"
-        }
-    )
-    apply_plotly_theme(fig_products)
-    st.plotly_chart(
-        fig_products,
-        width="stretch"
-    )
-# ============================================================
-# CUSTOMER INTELLIGENCE
-# ============================================================
-st.divider()
-st.header(
-    "👥 Customer Intelligence"
-)
-segment_summary = (
-    segments
-    .groupby("Segment")
-    .agg(
-        Customers=("Customer ID", "count"),
-        Avg_Recency=("Recency", "mean"),
-        Avg_Frequency=("Frequency", "mean"),
-        Avg_Monetary=("Monetary", "mean")
-    )
-    .reset_index()
-)
-segment_summary["Avg_Monetary_Display"] = (
-    segment_summary["Avg_Monetary"]
-    * exchange_rate
-)
-col1, col2 = st.columns(2)
-with col1:
-    fig_segments = px.pie(
-        segment_summary,
-        names="Segment",
-        values="Customers",
-        title="Customer Distribution",
-        template=plot_template
-    )
-    apply_plotly_theme(fig_segments)
-    st.plotly_chart(
-        fig_segments,
-        width="stretch"
-    )
-with col2:
-    display_segments = segment_summary[
-        [
-            "Segment",
-            "Customers",
-            "Avg_Recency",
-            "Avg_Frequency",
-            "Avg_Monetary_Display"
-        ]
-    ].copy()
-    display_segments = (
-        display_segments.rename(
-            columns={
-                "Avg_Monetary_Display":
-                f"Avg Monetary ({currency_code})"
-            }
-        )
-    )
-    display_segments["Avg_Recency"] = (
-        display_segments["Avg_Recency"]
-        .round(1)
-    )
-    display_segments["Avg_Frequency"] = (
-        display_segments["Avg_Frequency"]
-        .round(1)
-    )
-    display_segments[
-        f"Avg Monetary ({currency_code})"
-    ] = (
-        display_segments[
-            f"Avg Monetary ({currency_code})"
-        ].round(2)
-    )
-    st.dataframe(
-        display_segments,
-        width="stretch",
-        hide_index=True
-    )
-# ============================================================
-# AI BUSINESS INSIGHT ENGINE
-# ============================================================
-st.divider()
-st.header(
-    "🤖 AI Business Insight Engine"
-)
-st.caption(
-    "Automatically analyzing revenue, customers, "
-    "products and markets."
-)
-ai_insights = []
-ai_recommendations = []
-# Revenue trend
-ai_monthly = (
-    filtered_df
-    .groupby(
-        filtered_df["InvoiceDate"].dt.to_period("M")
-    )["DisplayRevenue"]
-    .sum()
-    .sort_index()
-)
-if len(ai_monthly) >= 2:
-    latest_revenue = ai_monthly.iloc[-1]
-    previous_revenue = ai_monthly.iloc[-2]
-    if previous_revenue != 0:
-        revenue_change = (
-            (latest_revenue - previous_revenue)
-            / previous_revenue
-            * 100
-        )
-        if revenue_change >= 10:
-            ai_insights.append(
-                (
-                    "success",
-                    "📈 Strong Revenue Growth",
-                    f"Revenue increased by "
-                    f"{revenue_change:.1f}% "
-                    "compared with the previous month."
-                )
-            )
-            ai_recommendations.append(
-                "Consider increasing inventory and marketing "
-                "investment around products driving the growth."
-            )
-        elif revenue_change <= -10:
-            ai_insights.append(
-                (
-                    "warning",
-                    "📉 Revenue Decline Detected",
-                    f"Revenue decreased by "
-                    f"{abs(revenue_change):.1f}% "
-                    "compared with the previous month."
-                )
-            )
-            ai_recommendations.append(
-                "Investigate products, markets and customer "
-                "activity responsible for the decline."
-            )
-        else:
-            ai_insights.append(
-                (
-                    "info",
-                    "📊 Revenue Relatively Stable",
-                    f"Revenue changed by "
-                    f"{revenue_change:+.1f}% "
-                    "compared with the previous month."
-                )
-            )
-# Top country
-ai_country_revenue = (
-    filtered_df
-    .groupby("Country")["DisplayRevenue"]
-    .sum()
-    .sort_values(ascending=False)
-)
-if not ai_country_revenue.empty:
-    best_country = (
-        ai_country_revenue.index[0]
-    )
-    best_country_revenue = (
-        ai_country_revenue.iloc[0]
-    )
-    ai_insights.append(
-        (
-            "success",
-            "🌍 Top Revenue Market",
-            f"{best_country} generated approximately "
-            f"{currency_symbol}"
-            f"{best_country_revenue:,.0f}."
-        )
-    )
-# Top product
-ai_product_revenue = (
-    filtered_df
-    .groupby("Description")["DisplayRevenue"]
-    .sum()
-    .sort_values(ascending=False)
-)
-if not ai_product_revenue.empty:
-    best_product = (
-        ai_product_revenue.index[0]
-    )
-    best_product_revenue = (
-        ai_product_revenue.iloc[0]
-    )
-    ai_insights.append(
-        (
-            "info",
-            "🛍️ Best Revenue Product",
-            f"{best_product} generated approximately "
-            f"{currency_symbol}"
-            f"{best_product_revenue:,.0f}."
-        )
-    )
-# Largest segment
-largest_segment = (
-    segment_summary
-    .sort_values(
-        "Customers",
-        ascending=False
-    )
-    .iloc[0]
-)
-ai_insights.append(
-    (
-        "info",
-        "👥 Largest Customer Segment",
-        f"{largest_segment['Segment']} contains "
-        f"{int(largest_segment['Customers']):,} customers."
-    )
-)
-# At-risk customers
-at_risk_segments = segment_summary[
-    segment_summary["Segment"]
-    .astype(str)
-    .str.contains(
-        "At Risk|Inactive",
-        case=False,
-        regex=True,
-        na=False
-    )
-]
-if not at_risk_segments.empty:
-    at_risk_count = int(
-        at_risk_segments["Customers"].sum()
-    )
-    total_segment_customers = int(
-        segment_summary["Customers"].sum()
-    )
-    at_risk_percentage = (
-        at_risk_count
-        / total_segment_customers
-        * 100
-        if total_segment_customers > 0
-        else 0
-    )
-    if at_risk_percentage >= 25:
-        ai_insights.append(
-            (
-                "warning",
-                "⚠️ Customer Retention Alert",
-                f"{at_risk_count:,} customers "
-                f"({at_risk_percentage:.1f}%) "
-                "are At Risk / Inactive."
-            )
-        )
-        ai_recommendations.append(
-            "Launch a targeted win-back campaign "
-            "for At Risk / Inactive customers."
-        )
-    else:
-        ai_insights.append(
-            (
-                "info",
-                "👥 Customer Retention Status",
-                f"{at_risk_count:,} customers "
-                f"({at_risk_percentage:.1f}%) "
-                "are At Risk / Inactive."
-            )
-        )
-# Display AI insights
-for insight_type, title, message in ai_insights:
-    if insight_type == "success":
-        st.success(
-            f"**{title}**  \n{message}"
-        )
-    elif insight_type == "warning":
-        st.warning(
-            f"**{title}**  \n{message}"
-        )
-    else:
-        st.info(
-            f"**{title}**  \n{message}"
-        )
-st.subheader(
-    "🎯 AI Business Recommendations"
-)
-if not ai_recommendations:
-    ai_recommendations.append(
-        "Continue monitoring revenue, products and "
-        "customer segments for emerging opportunities."
-    )
-for index, recommendation in enumerate(
-    ai_recommendations,
-    start=1
-):
-    st.markdown(
-        f"**{index}.** {recommendation}"
-    )
-# ============================================================
-# SALES FORECAST
-# ============================================================
-st.divider()
-st.header(
-    "🔮 Sales Forecast"
-)
-st.caption(
-    "Revenue forecast generated from historical monthly "
-    "sales trends and seasonal patterns."
-)
-if forecast_df.empty:
-    st.warning(
-        "Forecast data is unavailable. "
-        "Run sales_forecasting.py first."
-    )
-else:
-    forecast = forecast_df.copy()
-    forecast["DisplayForecast"] = (
-        forecast["Forecast_Revenue"]
-        * exchange_rate
-    )
-    total_forecast = (
-        forecast["DisplayForecast"].sum()
-    )
-    average_forecast = (
-        forecast["DisplayForecast"].mean()
-    )
-    first_forecast = (
-        forecast["DisplayForecast"].iloc[0]
-    )
-    last_forecast = (
-        forecast["DisplayForecast"].iloc[-1]
-    )
-    forecast_change = (
-        (
-            last_forecast
-            - first_forecast
-        )
-        / first_forecast
-        * 100
-        if first_forecast != 0
-        else 0
-    )
-    f1, f2, f3, f4 = st.columns(4)
-    with f1:
-        st.metric(
-            "💰 Forecast Revenue",
-            f"{currency_symbol}"
-            f"{total_forecast:,.0f}"
-        )
-    with f2:
-        st.metric(
-            "📊 Avg Monthly Forecast",
-            f"{currency_symbol}"
-            f"{average_forecast:,.0f}"
-        )
-    with f3:
-        st.metric(
-            "📅 Forecast Period",
-            f"{len(forecast)} Months"
-        )
-    with f4:
-        st.metric(
-            "📉 Forecast Change",
-            f"{forecast_change:+.1f}%"
-        )
-    history = (
-        df
-        .groupby(
-            df["InvoiceDate"].dt.to_period("M")
-        )["Revenue"]
-        .sum()
-        .reset_index()
-    )
-    history["Month"] = (
-        history["InvoiceDate"]
-        .dt.to_timestamp()
-    )
-    history["DisplayRevenue"] = (
-        history["Revenue"]
-        * exchange_rate
-    )
-    fig_forecast = go.Figure()
-    fig_forecast.add_trace(
-        go.Scatter(
-            x=history["Month"],
-            y=history["DisplayRevenue"],
-            mode="lines+markers",
-            name="Historical Revenue"
-        )
-    )
-    fig_forecast.add_trace(
-        go.Scatter(
-            x=forecast["Month"],
-            y=forecast["DisplayForecast"],
-            mode="lines+markers",
-            name="Forecast Revenue",
-            line=dict(dash="dash")
-        )
-    )
-    fig_forecast.update_layout(
-        title=(
-            f"Historical Revenue & 3-Month Forecast "
-            f"({currency_code})"
-        ),
-        xaxis_title="Month",
-        yaxis_title=f"Revenue ({currency_code})",
-        template=plot_template,
-        hovermode="x unified"
-    )
-    apply_plotly_theme(fig_forecast)
-    st.plotly_chart(
-        fig_forecast,
-        width="stretch"
-    )
-    st.subheader(
-        "📅 Forecast by Month"
-    )
-    forecast_table = forecast[
-        [
-            "Month",
-            "DisplayForecast"
-        ]
-    ].copy()
-    forecast_table["Month"] = (
-        forecast_table["Month"]
-        .dt.strftime("%B %Y")
-    )
-    forecast_table = (
-        forecast_table.rename(
-            columns={
-                "Month": "Forecast Month",
-                "DisplayForecast":
-                f"Forecast Revenue ({currency_code})"
-            }
-        )
-    )
-    forecast_table[
-        f"Forecast Revenue ({currency_code})"
-    ] = (
-        forecast_table[
-            f"Forecast Revenue ({currency_code})"
-        ].round(2)
-    )
-    st.dataframe(
-        forecast_table,
-        width="stretch",
-        hide_index=True
-    )
-    if forecast_change <= -10:
-        st.warning(
-            f"📉 Forecast Alert: Revenue is projected "
-            f"to decline by approximately "
-            f"{abs(forecast_change):.1f}%."
-        )
-    elif forecast_change >= 10:
-        st.success(
-            f"📈 Forecast Opportunity: Revenue is projected "
-            f"to increase by approximately "
-            f"{forecast_change:.1f}%."
-        )
-    else:
-        st.info(
-            f"📊 Forecast Status: Revenue is projected "
-            f"to remain relatively stable "
-            f"({forecast_change:+.1f}%)."
-        )
-# ============================================================
-# ADVANCED CUSTOMER INTELLIGENCE
-# ============================================================
-st.divider()
-st.header(
-    "🎯 Advanced Customer Intelligence"
-)
-segment_counts = (
-    segments["Segment"]
-    .value_counts()
-)
-def count_segment(keyword):
-    matching = [
-        name
-        for name in segment_counts.index
-        if keyword.lower()
-        in str(name).lower()
-    ]
-    if not matching:
-        return 0
-    return int(
-        segment_counts[matching].sum()
-    )
-vip_count = count_segment("VIP")
-high_value_count = count_segment(
-    "Potential High Value"
-)
-regular_count = count_segment(
-    "Regular"
-)
-at_risk_count = (
-    count_segment("At Risk")
-    + count_segment("Inactive")
-)
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric(
-        "👑 VIP / Loyal",
-        f"{vip_count:,}"
-    )
-with c2:
-    st.metric(
-        "💎 Potential High Value",
-        f"{high_value_count:,}"
-    )
-with c3:
-    st.metric(
-        "👤 Regular Customers",
-        f"{regular_count:,}"
-    )
-with c4:
-    st.metric(
-        "⚠️ At Risk / Inactive",
-        f"{at_risk_count:,}"
-    )
-# ============================================================
-# PRODUCT RECOMMENDATION CENTER
-# ============================================================
-st.divider()
-st.header(
-    "🎯 Product Recommendation Center"
-)
-st.caption(
-    "Personalized recommendations based on customer "
-    "behavior, segments and co-purchase patterns."
-)
-# ============================================================
-# TOP PRODUCTS
-# ============================================================
-st.subheader(
-    "🔥 Top Products"
-)
-popular_products = (
-    recommendation_results[
-        "popular_products"
-    ]
-    .copy()
-)
-if not popular_products.empty:
-    popular_display = (
-        popular_products.rename(
-            columns={
-                "Description":
-                "Product",
-                "Quantity":
-                "Quantity Sold",
-                "Orders":
-                "Orders",
-                "Revenue":
-                f"Revenue ({currency_code})"
-            }
-        )
-    )
-    revenue_column = (
-        f"Revenue ({currency_code})"
-    )
-    if revenue_column in popular_display.columns:
-        popular_display[
-            revenue_column
-        ] = (
-            popular_display[
-                revenue_column
-            ]
-            * exchange_rate
-        ).round(2)
-    st.dataframe(
-        popular_display,
-        width="stretch",
-        hide_index=True
-    )
-# ============================================================
-# SEGMENT RECOMMENDATIONS
-# ============================================================
-st.subheader(
-    "👥 Product Recommendations by Customer Segment"
-)
-segment_recommendations = (
-    recommendation_results[
-        "segment_recommendations"
-    ]
-    .copy()
-)
-if not segment_recommendations.empty:
-    available_segments = (
-        segment_recommendations[
-            "Segment"
-        ]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-    selected_segment = st.selectbox(
-        "Choose Customer Segment",
-        available_segments,
-        key="recommendation_segment"
-    )
-    segment_products = (
-        segment_recommendations[
-            segment_recommendations[
-                "Segment"
-            ]
-            == selected_segment
-        ]
-        .copy()
-    )
-    segment_products = (
-        segment_products.rename(
-            columns={
-                "Description":
-                "Recommended Product",
-                "Quantity":
-                "Quantity",
-                "Orders":
-                "Orders",
-                "Revenue":
-                f"Revenue ({currency_code})"
-            }
-        )
-    )
-    segment_revenue_column = (
-        f"Revenue ({currency_code})"
-    )
+
+
+def get_file_signature(uploaded_file):
+
+    if uploaded_file is None:
+
+        return None
+
+    return (
+        uploaded_file.name,
+        getattr(uploaded_file, "size", None),
+    )
+
+
+def reset_for_new_file(signature):
+
+    previous_signature = (
+        st.session_state.file_signature
+    )
+
     if (
-        segment_revenue_column
-        in segment_products.columns
+        previous_signature is not None
+        and previous_signature != signature
     ):
-        segment_products[
-            segment_revenue_column
-        ] = (
-            segment_products[
-                segment_revenue_column
-            ]
-            * exchange_rate
-        ).round(2)
-    st.dataframe(
-        segment_products,
-        width="stretch",
-        hide_index=True
+
+        st.session_state.analysis_completed = False
+
+        st.session_state.raw_data = None
+
+        st.session_state.cleaned_data = None
+
+        st.session_state.detected_columns = {}
+
+        st.session_state.cleaning_report = None
+
+        st.session_state.preview_result = None
+
+        st.session_state.preview_signature = None
+
+        st.session_state.analysis_results = None
+
+        st.session_state.analysis_seconds = None
+
+        st.session_state.tips_open = False
+
+        st.session_state.quick_summary_open = False
+
+
+    st.session_state.file_signature = signature
+
+
+def format_field_name(value):
+
+    return (
+        str(value)
+        .replace("_", " ")
+        .title()
     )
+
+
 # ============================================================
-# FREQUENTLY BOUGHT TOGETHER
+# HERO
 # ============================================================
+
+
+st.title(
+    "📊 Universal AI Business Intelligence"
+)
+
+
 st.subheader(
-    "🔗 Frequently Bought Together"
+    "Turn raw business data into clear, actionable intelligence."
 )
-product_pairs = (
-    recommendation_results[
-        "product_pairs"
-    ]
-    .copy()
-)
-if not product_pairs.empty:
-    pair_display = (
-        product_pairs.rename(
-            columns={
-                "Product_A":
-                "Product A",
-                "Product_B":
-                "Product B",
-                "Co_Purchase_Count":
-                "Times Purchased Together"
-            }
-        )
-    )
-    st.dataframe(
-        pair_display,
-        width="stretch",
-        hide_index=True
-    )
-    strongest_pair = (
-        product_pairs.iloc[0]
-    )
-    st.success(
-        f"🛍️ **Strongest Product Pair:** "
-        f"{strongest_pair['Product_A']} + "
-        f"{strongest_pair['Product_B']} "
-        f"were purchased together "
-        f"{int(strongest_pair['Co_Purchase_Count']):,} times."
-    )
-# ============================================================
-# CUSTOMER ID LOOKUP
-# ============================================================
-st.divider()
-st.subheader(
-    "🔎 Customer ID Verification & Recommendations"
-)
+
+
 st.caption(
-    "Select an existing customer from the list OR "
-    "enter a Customer ID manually."
+    "Analyze sales, retail, customer, transaction and other "
+    "business datasets automatically."
 )
+
+
+
+st.caption(
+    "CSV • XLSX • XLS  |  Automatic Detection • Cleaning • Analytics"
+)
+
+
+st.divider()
+
+
 # ============================================================
-# PREPARE CUSTOMER LOOKUP
+# VALUE PROPOSITION
 # ============================================================
-customer_lookup = (
-    recommendation_results[
-        "customer_recommendations"
-    ]
-    .copy()
+
+
+st.subheader(
+    "Why use Universal AI BI?"
 )
-customer_lookup["Customer_ID_Clean"] = pd.to_numeric(
-    customer_lookup["Customer ID"],
-    errors="coerce"
-)
-customer_lookup = customer_lookup[
-    customer_lookup[
-        "Customer_ID_Clean"
-    ].notna()
-].copy()
-customer_lookup["Customer_ID_Clean"] = (
-    customer_lookup[
-        "Customer_ID_Clean"
-    ]
-    .astype(int)
-)
+
+
+value_col1, value_col2, value_col3 = st.columns(3)
+
+
+with value_col1:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### ⚡ Fast Dataset Review"
+        )
+
+        st.write(
+            "Quickly understand your dataset "
+            "before running full analysis."
+        )
+
+
+with value_col2:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### 🧠 Automatic Intelligence"
+        )
+
+        st.write(
+            "Automatically detect customers, "
+            "products, dates, prices and quantities."
+        )
+
+
+with value_col3:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### 📈 Business Insights"
+        )
+
+        st.write(
+            "Turn raw business data into "
+            "meaningful decisions and insights."
+        )
+
+
+st.divider()
+
+
 # ============================================================
-# ACTUAL CUSTOMER IDS
+# UPLOAD SECTION
 # ============================================================
-retail_customer_ids = (
-    pd.to_numeric(
-        df["Customer ID"],
-        errors="coerce"
-    )
-    .dropna()
-    .astype(int)
-    .unique()
+
+
+st.header(
+    "📂 Upload Your Dataset"
 )
-retail_customer_id_set = set(
-    retail_customer_ids
+
+
+st.write(
+    "Upload a CSV or Excel dataset to start your "
+    "business intelligence analysis."
 )
-recommendation_customer_id_set = set(
-    customer_lookup[
-        "Customer_ID_Clean"
-    ]
-)
+
+
+upload_col1, upload_col2, upload_col3 = st.columns(3)
+
+
+with upload_col1:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### 📄 CSV"
+        )
+
+        st.caption(
+            "Fast and lightweight"
+        )
+
+
+with upload_col2:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### 📊 XLSX / XLS"
+        )
+
+        st.caption(
+            "Excel business datasets"
+        )
+
+
+with upload_col3:
+
+    with st.container(border=True):
+
+        st.markdown(
+            "### 🚀 Up to 10 GB"
+        )
+
+        st.caption(
+            "Configured upload capacity"
+        )
+
+
+st.write("")
+
+
 # ============================================================
-# LOOKUP METHOD
+# FILE UPLOADER
 # ============================================================
-lookup_method = st.radio(
-    "Choose how you want to find the customer:",
-    [
-        "📋 Select from Customer IDs",
-        "⌨️ Enter Customer ID manually"
+
+
+uploaded_file = st.file_uploader(
+    "Choose or drop your business dataset",
+    type=[
+        "csv",
+        "xlsx",
+        "xls",
     ],
-    horizontal=True,
-    key="customer_lookup_method"
+    help=(
+        "Supported formats: CSV, XLSX and XLS. "
+        "Upload capacity is configured separately "
+        "through Streamlit."
+    ),
 )
-selected_customer_id = None
+
+
 # ============================================================
-# OPTION 1 — DROPDOWN
+# EMPTY STATE
 # ============================================================
-if lookup_method == "📋 Select from Customer IDs":
-    available_customer_ids = sorted(
-        customer_lookup[
-            "Customer_ID_Clean"
-        ]
-        .astype(int)
-        .unique()
-        .tolist()
+
+
+if uploaded_file is None:
+
+    st.info(
+        "👆 Upload a dataset to unlock the Business "
+        "Intelligence dashboard."
     )
-    if available_customer_ids:
-        selected_customer_id = st.selectbox(
-            "Select Customer ID",
-            available_customer_ids,
-            format_func=lambda x: str(x),
-            key="existing_customer_id"
-        )
-    else:
-        st.warning(
-            "No customer IDs are currently available."
-        )
-# ============================================================
-# OPTION 2 — MANUAL ENTRY
-# ============================================================
-else:
-    manual_customer_id = st.text_input(
-        "Enter Customer ID",
-        placeholder="Example: 18235",
-        key="manual_customer_id"
+
+    st.subheader(
+        "What happens after you upload?"
     )
-    if manual_customer_id.strip() == "":
-        st.info(
-            "👤 Enter a Customer ID to search."
-        )
-    else:
-        cleaned_customer_id = (
-            manual_customer_id.strip()
-        )
-        try:
-            numeric_customer_id = float(
-                cleaned_customer_id
+
+    process_col1, process_col2 = st.columns(2)
+
+
+    with process_col1:
+
+        with st.container(border=True):
+
+            st.markdown(
+                "### 01 · ⚡ Quick Review"
             )
-            if not numeric_customer_id.is_integer():
-                st.error(
-                    "❌ Invalid Customer ID. "
-                    "Customer IDs must be whole numbers."
+
+            st.write(
+                "We quickly inspect your dataset structure "
+                "without processing the entire file."
+            )
+
+
+        with st.container(border=True):
+
+            st.markdown(
+                "### 03 · 🧹 Clean"
+            )
+
+            st.write(
+                "Invalid records, duplicates and unsuitable "
+                "values are identified and cleaned."
+            )
+
+
+    with process_col2:
+
+        with st.container(border=True):
+
+            st.markdown(
+                "### 02 · 🔍 Detect"
+            )
+
+            st.write(
+                "Business columns such as Customer, Product, "
+                "Price, Quantity and Date are detected automatically."
+            )
+
+
+        with st.container(border=True):
+
+            st.markdown(
+                "### 04 · 📊 Analyze"
+            )
+
+            st.write(
+                "Generate KPIs, revenue trends, products, "
+                "customers and country performance."
+            )
+
+
+    st.stop()
+
+
+# ============================================================
+# FILE SIGNATURE
+# ============================================================
+
+
+current_signature = get_file_signature(
+    uploaded_file
+)
+
+
+reset_for_new_file(
+    current_signature
+)
+
+
+# ============================================================
+# MAIN DATA PROCESSING
+# ============================================================
+
+
+try:
+
+    # ========================================================
+    # QUICK PREVIEW
+    # ========================================================
+
+
+    if (
+        st.session_state.preview_result is None
+        or st.session_state.preview_signature
+        != current_signature
+    ):
+
+        with st.spinner(
+            "⚡ Quickly reviewing your dataset..."
+        ):
+
+            preview_result = preview_uploaded_file(
+                uploaded_file,
+                preview_rows=1000,
+            )
+
+
+        st.session_state.preview_result = (
+            preview_result
+        )
+
+        st.session_state.preview_signature = (
+            current_signature
+        )
+
+    else:
+
+        preview_result = (
+            st.session_state.preview_result
+        )
+
+
+    preview_df = preview_result["preview"]
+
+    filename = preview_result["filename"]
+
+    extension = preview_result["extension"]
+
+
+    # ========================================================
+    # FILE RECEIVED
+    # ========================================================
+
+
+    st.success(
+        f"✅ Dataset received: {filename}"
+    )
+
+
+    # ========================================================
+    # QUICK DATASET REVIEW
+    # ========================================================
+
+
+    st.header(
+        "⚡ Quick Dataset Review"
+    )
+
+
+    review_col1, review_col2, review_col3 = (
+        st.columns(3)
+    )
+
+
+    with review_col1:
+
+        st.metric(
+            "Preview Rows",
+            f"{len(preview_df):,}",
+        )
+
+
+    with review_col2:
+
+        st.metric(
+            "Columns",
+            f"{preview_df.shape[1]:,}",
+        )
+
+
+    with review_col3:
+
+        st.metric(
+            "File Type",
+            extension.upper(),
+        )
+
+
+    # ========================================================
+    # AUTOMATIC COLUMN DETECTION
+    # ========================================================
+
+
+    st.header(
+        "🔍 Automatic Column Detection"
+    )
+
+
+    detected_preview_columns = detect_columns(
+        preview_df
+    )
+
+
+    if detected_preview_columns:
+
+        detection_rows = []
+
+
+        for (
+            business_field,
+            column,
+        ) in detected_preview_columns.items():
+
+            detection_rows.append(
+                {
+                    "Business Field": format_field_name(
+                        business_field
+                    ),
+                    "Detected Column": column,
+                    "Status": "✓ Detected",
+                }
+            )
+
+
+        detection_df = pd.DataFrame(
+            detection_rows
+        )
+
+
+        st.dataframe(
+            detection_df,
+            hide_index=True,
+            width="stretch",
+        )
+
+    else:
+
+        st.warning(
+            "⚠️ No recognized business columns "
+            "were detected."
+        )
+
+
+    # ========================================================
+    # SAMPLE DATA
+    # ========================================================
+
+
+    with st.expander(
+        "👀 View Sample Data",
+        expanded=True,
+    ):
+
+        st.dataframe(
+            preview_df.head(100),
+            hide_index=True,
+            width="stretch",
+        )
+
+
+    # ========================================================
+    # ANALYSIS CTA
+    # ========================================================
+
+
+    st.divider()
+
+
+    st.header(
+        "🚀 Ready to analyze your data?"
+    )
+
+
+    st.write(
+        "Run a complete analysis to generate your "
+        "Business Intelligence dashboard."
+    )
+
+
+    analyze_clicked = st.button(
+        "🚀 Analyze My Dataset",
+        type="primary",
+        width="stretch",
+    )
+
+
+    # ========================================================
+    # RUN ANALYSIS
+    # ========================================================
+
+
+    if analyze_clicked:
+
+        analysis_start = time.perf_counter()
+
+
+        # ----------------------------------------------------
+        # LOAD DATASET
+        # ----------------------------------------------------
+
+
+        if (
+            st.session_state.raw_data is not None
+            and st.session_state.file_signature
+            == current_signature
+        ):
+
+            df = st.session_state.raw_data
+
+            st.info(
+                "⚡ Reusing the already loaded dataset."
+            )
+
+        else:
+
+            with st.spinner(
+                "📥 Loading the complete dataset..."
+            ):
+
+                df = load_uploaded_file(
+                    uploaded_file
+                )
+
+
+        # ----------------------------------------------------
+        # DETECT BUSINESS COLUMNS
+        # ----------------------------------------------------
+
+
+        with st.spinner(
+            "🔍 Detecting business columns..."
+        ):
+
+            detected_columns = detect_columns(
+                df
+            )
+
+
+        # ----------------------------------------------------
+        # CLEAN DATA
+        # ----------------------------------------------------
+
+
+        with st.spinner(
+            "🧹 Cleaning and validating the dataset..."
+        ):
+
+            cleaned_df, cleaning_report = (
+                clean_dataset(
+                    df,
+                    detected_columns,
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # BUSINESS ANALYTICS
+        # ----------------------------------------------------
+
+
+        with st.spinner(
+            "📊 Calculating business analytics..."
+        ):
+
+            kpis = calculate_kpis(
+                cleaned_df,
+                detected_columns,
+            )
+
+
+            monthly = monthly_revenue(
+                cleaned_df,
+                detected_columns,
+            )
+
+
+            products = top_products(
+                cleaned_df,
+                detected_columns,
+                limit=10,
+            )
+
+
+            customers = top_customers(
+                cleaned_df,
+                detected_columns,
+                limit=10,
+            )
+
+
+            countries = revenue_by_country(
+                cleaned_df,
+                detected_columns,
+                limit=10,
+            )
+
+
+        # ----------------------------------------------------
+        # CUSTOMER SEGMENTATION
+        # ----------------------------------------------------
+
+
+        with st.spinner(
+            "👥 Segmenting customers..."
+        ):
+
+            segmented_customers = (
+                segment_customers(
+                    cleaned_df,
+                    detected_columns,
+                    n_clusters=4,
+                )
+            )
+
+
+            customer_segment_summary = (
+                segment_summary(
+                    segmented_customers
+                )
+            )
+
+
+            customer_segment_insights = (
+                segment_insights(
+                    customer_segment_summary
+                )
+            )
+    # ---------------------------------------------------------
+    # SALES FORECASTING
+    # ---------------------------------------------------------
+        with st.spinner("📈 Generating sales forecast..."):
+
+            sales_forecast = forecast_sales(
+                cleaned_df,
+                detected_columns,
+                periods=3
+            )
+
+            sales_forecast_summary = forecast_summary(
+                sales_forecast
+            )
+
+            sales_forecast_accuracy = forecast_accuracy(
+                cleaned_df,
+                detected_columns
+            )
+
+            sales_forecast_insights = forecast_insights(
+                sales_forecast,
+             
+    )
+        # ====================================================
+        # RECOMMENDATION ENGINE
+        # ====================================================
+
+        with st.spinner(
+            "🛍️ Generating business recommendations..."
+        ):
+
+            customer_recommendation_results = (
+                customer_recommendations(
+                    cleaned_df,
+                    detected_columns,
+                    limit=5,
+                )
+            )
+
+            product_pair_recommendations = (
+                frequently_bought_together(
+                    cleaned_df,
+                    detected_columns,
+                    limit=10,
+                )
+            )
+
+            product_strategy_results = (
+                product_strategy_recommendations(
+                    cleaned_df,
+                    detected_columns,
+                    segmented_customers=segmented_customers,
+                    limit=6,
+                )
+            )
+
+            recommendation_results_summary = (
+                recommendation_summary(
+                    cleaned_df,
+                    detected_columns,
+                    segmented_customers=segmented_customers,
+                )
+            )
+
+        # =====================================================
+        # AI BUSINESS INSIGHTS
+        # =====================================================
+
+        with st.spinner("🤖 Generating AI business insights..."):
+
+            ai_business_insights = generate_ai_insights(
+                cleaned_df,
+                detected_columns,
+                segmented_customers=segmented_customers,
+                forecast=sales_forecast,
+                recommendations=customer_recommendation_results,
+            )
+
+            ai_business_actions = generate_business_actions(
+                segmented_customers=segmented_customers,
+                recommendations=customer_recommendation_results,
+            )
+
+        
+        # ----------------------------------------------------
+        # SAVE DATA IN SESSION
+        # ----------------------------------------------------
+
+
+        st.session_state.raw_data = df
+
+
+        st.session_state.cleaned_data = (
+            cleaned_df
+        )
+
+
+        st.session_state.detected_columns = (
+            detected_columns
+        )
+
+
+        st.session_state.cleaning_report = (
+            cleaning_report
+        )
+
+
+        st.session_state.analysis_results = {
+
+            "kpis": kpis,
+
+            "monthly": monthly,
+
+            "products": products,
+
+            "customers": customers,
+        
+
+            "countries": countries,
+
+            "segmented_customers": (
+                segmented_customers
+            ),
+
+            "customer_segment_summary": (
+                customer_segment_summary
+            ),
+
+            "customer_segment_insights": (
+                customer_segment_insights
+            ),
+            "sales_forecast": sales_forecast,
+            "sales_forecast_summary": sales_forecast_summary,
+            "sales_forecast_accuracy": sales_forecast_accuracy,
+            "sales_forecast_insights": sales_forecast_insights,
+        }
+
+
+        st.session_state.analysis_completed = True
+
+
+        elapsed = (
+            time.perf_counter()
+            - analysis_start
+        )
+
+
+        st.session_state.analysis_seconds = (
+            elapsed
+        )
+
+
+        st.session_state.tips_open = False
+        st.session_state.quick_summary_open = False
+
+        st.success(
+            "🎉 Business analysis completed successfully! "
+            f"Processing time: {elapsed:.2f} seconds."
+        )
+        analysis_results = {
+            # -----------------------------------------
+            # BASIC BUSINESS ANALYTICS
+            # -----------------------------------------
+
+            "kpis": kpis,
+            "monthly": monthly,
+            "products": products,
+            "customers": customers,
+            "countries": countries,
+
+            # -----------------------------------------
+            # CUSTOMER SEGMENTATION
+            # -----------------------------------------
+
+            "segmented_customers": segmented_customers,
+            "customer_segment_summary": customer_segment_summary,
+            "customer_segment_insights": customer_segment_insights,
+
+            # -----------------------------------------
+            # SALES FORECASTING
+            # -----------------------------------------
+
+            "sales_forecast": sales_forecast,
+            "sales_forecast_summary": sales_forecast_summary,
+            "sales_forecast_accuracy": sales_forecast_accuracy,
+            "sales_forecast_insights": sales_forecast_insights,
+            "ai_business_insights": ai_business_insights,
+            "ai_business_actions": ai_business_actions,
+
+            # -----------------------------------------
+            # RECOMMENDATIONS
+            # -----------------------------------------
+
+            "customer_recommendations": customer_recommendation_results,
+            "product_pair_recommendations": product_pair_recommendations,
+            "product_strategy_recommendations": product_strategy_results,
+            "recommendation_summary": recommendation_results_summary,
+        }
+
+        st.session_state.analysis_results = analysis_results
+
+    # ========================================================
+    # SHOW ANALYSIS
+    # ========================================================
+
+
+    if (
+        st.session_state.analysis_completed
+        and st.session_state.analysis_results
+        is not None
+    ):
+
+        # ----------------------------------------------------
+        # GET CACHED DATA
+        # ----------------------------------------------------
+
+
+        df = st.session_state.raw_data
+
+
+        cleaned_df = (
+            st.session_state.cleaned_data
+        )
+
+
+        detected_columns = (
+            st.session_state.detected_columns
+        )
+
+
+        cleaning_report = (
+            st.session_state.cleaning_report
+        )
+
+
+        analysis_results = (
+            st.session_state.analysis_results
+        )
+
+
+        kpis = analysis_results["kpis"]
+
+
+        monthly = analysis_results["monthly"]
+
+
+        products = analysis_results["products"]
+
+
+        customers = analysis_results["customers"]
+
+
+        countries = analysis_results["countries"]
+
+
+        segmented_customers = (
+            analysis_results.get(
+                "segmented_customers",
+                pd.DataFrame(),
+            )
+        )
+
+
+        customer_segment_summary = (
+            analysis_results.get(
+                "customer_segment_summary",
+                pd.DataFrame(),
+            )
+        )
+
+
+        customer_segment_insights = (
+            analysis_results.get(
+                "customer_segment_insights",
+                [],
+            )
+        )
+        # ====================================================
+        # RECOMMENDATION RESULTS
+        # ====================================================
+
+        customer_recommendation_results = (
+            analysis_results.get(
+                "customer_recommendations",
+                [],
+            )
+        )
+
+        product_pair_recommendations = (
+            analysis_results.get(
+                "product_pair_recommendations",
+                [],
+            )
+        )
+
+        product_strategy_results = (
+            analysis_results.get(
+                "product_strategy_recommendations",
+                [],
+            )
+        )
+
+        recommendation_results_summary = (
+            analysis_results.get(
+                "recommendation_summary",
+                {},
+            )
+        )
+
+        # =====================================================
+        # AI BUSINESS INSIGHTS RESULTS
+        # =====================================================
+
+        ai_business_insights = (
+            analysis_results.get(
+                "ai_business_insights",
+                {}
+            )
+        )
+
+        ai_business_actions = (
+            analysis_results.get(
+                "ai_business_actions",
+                []
+            )
+        )
+
+        # ====================================================
+        # SALES FORECASTING RESULTS
+        # ====================================================
+
+        sales_forecast = analysis_results.get(
+            "sales_forecast",
+            pd.DataFrame(
+                columns=["Month", "Forecast Revenue"]
+            ),
+        )
+
+        sales_forecast_summary = analysis_results.get(
+            "sales_forecast_summary",
+            {
+                "forecast_periods": 0,
+                "total_forecast": 0.0,
+                "average_monthly_forecast": 0.0,
+            },
+        )
+
+        sales_forecast_accuracy = analysis_results.get(
+            "sales_forecast_accuracy",
+            {
+                "mae": None,
+                "rmse": None,
+            },
+        )
+
+        sales_forecast_insights = analysis_results.get(
+            "sales_forecast_insights",
+            {},
+        )
+
+        
+
+
+
+    # ============================================================
+    # FLOATING QUICK ACTION BUTTONS
+    # ============================================================
+
+    with st.container(
+        key="quick_actions_container"
+    ):
+
+        # QUICK SUMMARY
+        if st.button(
+            "📊 Quick Summary",
+            key="quick_summary_button_final",
+        ):
+            st.session_state.quick_summary_open = (
+                not st.session_state.quick_summary_open
+            )
+
+        # ANALYSIS TIPS
+        if st.button(
+            "💡 Analysis Tips",
+            key="analysis_tips_button_final",
+        ):
+            st.session_state.tips_open = (
+                not st.session_state.tips_open
+            )
+
+        
+        # ====================================================
+        # FLOATING ANALYSIS TIPS PANEL
+        # ====================================================
+
+
+        if st.session_state.tips_open:
+
+            with st.container(
+                key="analysis_tips_panel"
+            ):
+
+                st.markdown(
+                    "### 💡 Analysis Tips"
+                )
+
+
+                st.markdown(
+                    """
+                    **📊 Dataset Quality**
+
+                    Check missing values, duplicates and invalid records before trusting the results.
+
+                    **📈 Revenue Trends**
+
+                    Look for major peaks, sudden drops and repeating seasonal patterns.
+
+                    **👥 Customers**
+
+                    Compare high-value customers with regular and inactive customers.
+
+                    **🛒 Products**
+
+                    A product generating high revenue does not automatically mean it has high profitability.
+
+                    **🎯 Segmentation**
+
+                    At-risk customers may require targeted win-back campaigns.
+
+                    **🔮 Forecast**
+
+                    Forecast values are estimates based on historical patterns — they are not guarantees.
+
+                    **🤖 AI Insights**
+
+                    Use generated recommendations as decision support, not as a replacement for business judgement.
+                    """
+                )
+
+
+                st.markdown("---")
+
+
+                if st.button(
+                    "✕ Close",
+                    key="close_analysis_tips",
+                ):
+
+                    st.session_state.tips_open = False
+                    st.session_state.quick_summary_open = False
+                    st.rerun()
+        # ============================================================
+        # FLOATING QUICK SUMMARY PANEL
+        # ============================================================
+
+        if (
+            st.session_state.get("quick_summary_open", False)
+            and st.session_state.get("analysis_completed", False)
+            and st.session_state.get("analysis_results")
+        ):
+
+            quick_results = st.session_state.analysis_results
+
+            quick_kpis = quick_results.get("kpis", {})
+            quick_segments = quick_results.get(
+                "customer_segment_summary"
+            )
+            quick_forecast = quick_results.get(
+                "sales_forecast_summary",
+                {}
+            )
+            quick_insights = quick_results.get(
+                "ai_business_insights"
+            )
+
+            with st.container(
+                key="quick_summary_panel"
+            ):
+
+                st.markdown(
+                    "### 📊 Quick Business Summary"
+                )
+
+                # ----------------------------------------------------
+                # KPI SUMMARY
+                # ----------------------------------------------------
+
+                quick_revenue = quick_kpis.get(
+                    "revenue",
+                    0
+                )
+
+                quick_orders = quick_kpis.get(
+                    "orders",
+                    0
+                )
+
+                quick_customers = quick_kpis.get(
+                    "customers",
+                    0
+                )
+
+                quick_products = quick_kpis.get(
+                    "products",
+                    0
+                )
+
+                q1, q2 = st.columns(2)
+
+                with q1:
+                    st.metric(
+                        "💰 Revenue",
+                        f"{quick_revenue:,.2f}"
+                    )
+
+                    st.metric(
+                        "🛒 Orders",
+                        f"{quick_orders:,}"
+                    )
+
+                with q2:
+                    st.metric(
+                        "👥 Customers",
+                        f"{quick_customers:,}"
+                    )
+
+                    st.metric(
+                        "📦 Products",
+                        f"{quick_products:,}"
+                    )
+
+                # ----------------------------------------------------
+                # CUSTOMER SUMMARY
+                # ----------------------------------------------------
+
+                st.markdown(
+                    "#### 👥 Customer Snapshot"
+                )
+
+                if (
+                    isinstance(
+                        quick_segments,
+                        pd.DataFrame
+                    )
+                    and not quick_segments.empty
+                ):
+
+                    segment_text = []
+
+                    for _, row in quick_segments.iterrows():
+
+                        segment_name = str(
+                            row.get(
+                                "Segment",
+                                "Customer Segment"
+                            )
+                        )
+
+                        customer_count = row.get(
+                            "Customers",
+                            0
+                        )
+
+                        segment_text.append(
+                            f"• **{segment_name}:** "
+                            f"{int(customer_count):,} customers"
+                        )
+
+                    for item in segment_text[:4]:
+                        st.write(item)
+
+                else:
+                    st.info(
+                        "Customer segmentation data is not available."
+                    )
+
+                # ----------------------------------------------------
+                # FORECAST SUMMARY
+                # ----------------------------------------------------
+
+                st.markdown(
+                    "#### 🔮 Forecast Snapshot"
+                )
+
+                if isinstance(
+                    quick_forecast,
+                    dict
+                ):
+
+                    forecast_periods = quick_forecast.get(
+                        "forecast_periods",
+                        0
+                    )
+
+                    total_forecast = quick_forecast.get(
+                        "total_forecast",
+                        0
+                    )
+
+                    st.write(
+                        f"• Forecast period: **"
+                        f"{forecast_periods} months**"
+                    )
+
+                    st.write(
+                        f"• Expected revenue: **"
+                        f"{total_forecast:,.2f}**"
+                    )
+
+                # ----------------------------------------------------
+                # AI BUSINESS INSIGHTS
+                # ----------------------------------------------------
+
+                st.markdown(
+                    "#### 🤖 Key Insight"
+                )
+
+                if quick_insights:
+
+                    if isinstance(
+                        quick_insights,
+                        dict
+                    ):
+
+                        shown = False
+
+                        for title, insight in (
+                            quick_insights.items()
+                        ):
+
+                            if insight:
+
+                                st.info(
+                                    f"💡 **{str(title).replace('_', ' ').title()}**\n\n"
+                                    f"{insight}"
+                                )
+
+                                shown = True
+                                break
+
+                        if not shown:
+                            st.info(
+                                "No major AI insight is available."
+                            )
+
+                    elif isinstance(
+                        quick_insights,
+                        list
+                    ):
+
+                        if len(quick_insights) > 0:
+
+                            st.info(
+                                f"💡 {quick_insights[0]}"
+                            )
+
+                        else:
+                            st.info(
+                                "No major AI insight is available."
+                            )
+
+                    else:
+
+                        st.info(
+                            f"💡 {quick_insights}"
+                        )
+
+                else:
+
+                    st.info(
+                        "No AI business insight is available."
+                    )
+
+                # ----------------------------------------------------
+                # CLOSE BUTTON
+                # ----------------------------------------------------
+
+                if st.button(
+                    "✕ Close Quick Summary",
+                    key="close_quick_summary",
+                ):
+
+                    st.session_state.quick_summary_open = False
+                    st.rerun()
+                
+
+
+        # ----------------------------------------------------
+        # CACHE MESSAGE
+        # ----------------------------------------------------
+
+
+        if not analyze_clicked:
+
+            st.success(
+                "✅ This dataset has already been analyzed. "
+                "The cached analysis is being reused."
+            )
+
+
+        # ====================================================
+        # DATASET OVERVIEW
+        # ====================================================
+
+
+        st.header(
+            "📋 Dataset Overview"
+        )
+        if st.session_state.cleaned_data is None:
+            st.warning("⚠️ Please analyze the dataset first.")
+            st.stop()
+
+        summary = get_dataset_summary(
+            st.session_state.cleaned_data
+        )
+
+        # FOUR COLUMNS — FIXED
+
+
+        overview_col1, overview_col2, overview_col3, overview_col4 = (
+            st.columns(4)
+        )
+
+
+        with overview_col1:
+
+            st.metric(
+                "Total Rows",
+                f"{summary['rows']:,}",
+            )
+
+
+        with overview_col2:
+
+            st.metric(
+                "Columns",
+                f"{summary['columns']:,}",
+            )
+
+
+        with overview_col3:
+
+            st.metric(
+                "Missing Values",
+                f"{summary['missing_values']:,}",
+            )
+
+
+        with overview_col4:
+
+            st.metric(
+                "Duplicate Rows",
+                f"{summary['duplicate_rows']:,}",
+            )
+
+
+        # ====================================================
+        # DETECTED BUSINESS FIELDS
+        # ====================================================
+
+
+        st.subheader(
+            "🧠 Detected Business Fields"
+        )
+
+
+        if detected_columns:
+
+            full_detection_rows = []
+
+
+            for (
+                business_field,
+                column,
+            ) in detected_columns.items():
+
+                full_detection_rows.append(
+                    {
+                        "Business Field": format_field_name(
+                            business_field
+                        ),
+                        "Detected Column": column,
+                        "Status": "✓ Ready",
+                    }
+                )
+
+
+            st.dataframe(
+                pd.DataFrame(
+                    full_detection_rows
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+        else:
+
+            st.warning(
+                "⚠️ No business fields were detected."
+            )
+
+
+        # ====================================================
+        # CLEANING RESULTS
+        # ====================================================
+
+
+        st.header(
+            "🧹 Data Cleaning"
+        )
+
+
+        clean_col1, clean_col2, clean_col3 = (
+            st.columns(3)
+        )
+
+
+        with clean_col1:
+
+            st.metric(
+                "Original Rows",
+                f"{cleaning_report['original_rows']:,}",
+            )
+
+
+        with clean_col2:
+
+            st.metric(
+                "Clean Rows",
+                f"{cleaning_report['final_rows']:,}",
+            )
+
+
+        with clean_col3:
+
+            st.metric(
+                "Rows Removed",
+                f"{cleaning_report['rows_removed']:,}",
+            )
+
+
+        with st.expander(
+            "🔎 View Cleaning Details"
+        ):
+
+            cleaning_rows = []
+
+
+            for (
+                key,
+                value,
+            ) in cleaning_report.items():
+
+                cleaning_rows.append(
+                    {
+                        "Cleaning Check": format_field_name(
+                            key
+                        ),
+                        "Result": value,
+                    }
+                )
+
+
+            st.dataframe(
+                pd.DataFrame(
+                    cleaning_rows
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+
+
+        # ====================================================
+        # BUSINESS ANALYTICS
+        # ====================================================
+
+
+        st.divider()
+
+
+        st.header(
+            "📊 Business Analytics"
+        )
+
+
+        # ====================================================
+        # KPI CARDS
+        # ====================================================
+
+
+        st.subheader(
+            "💰 Key Performance Indicators"
+        )
+
+
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = (
+            st.columns(4)
+        )
+
+
+        with kpi_col1:
+
+            st.metric(
+                "Total Revenue",
+                f"{kpis['revenue']:,.2f}",
+            )
+
+
+        with kpi_col2:
+
+            st.metric(
+                "Orders",
+                f"{kpis['orders']:,}",
+            )
+
+
+        with kpi_col3:
+
+            st.metric(
+                "Customers",
+                f"{kpis['customers']:,}",
+            )
+
+
+        with kpi_col4:
+
+            st.metric(
+                "Products",
+                f"{kpis['products']:,}",
+            )
+
+
+        kpi_col5, kpi_col6, kpi_col7 = (
+            st.columns(3)
+        )
+
+
+        with kpi_col5:
+
+            st.metric(
+                "Quantity Sold",
+                f"{kpis['quantity']:,.0f}",
+            )
+
+
+        with kpi_col6:
+
+            st.metric(
+                "Average Order Value",
+                f"{kpis['average_order_value']:,.2f}",
+            )
+
+
+        with kpi_col7:
+
+            st.metric(
+                "Average Customer Value",
+                f"{kpis['average_customer_value']:,.2f}",
+            )
+
+
+        # ====================================================
+        # MONTHLY REVENUE
+        # ====================================================
+
+
+        st.subheader(
+            "📈 Monthly Revenue"
+        )
+
+
+        if not monthly.empty:
+
+            st.line_chart(
+                monthly.set_index(
+                    "Month"
+                )[["Revenue"]]
+            )
+
+        else:
+
+            st.info(
+                "ℹ️ Monthly revenue could not be generated "
+                "because a valid date column was not detected."
+            )
+
+
+        # ====================================================
+        # PRODUCTS + COUNTRY
+        # ====================================================
+
+
+        chart_col1, chart_col2 = (
+            st.columns(2)
+        )
+
+
+        with chart_col1:
+
+            st.subheader(
+                "🏆 Top Products"
+            )
+
+
+            if not products.empty:
+
+                st.bar_chart(
+                    products.set_index(
+                        "Product"
+                    )[["Revenue"]]
+                )
+
+
+                with st.expander(
+                    "View Product Details"
+                ):
+
+                    st.dataframe(
+                        products,
+                        hide_index=True,
+                        width="stretch",
+                    )
+
+            else:
+
+                st.info(
+                    "Product information was not detected."
+                )
+
+
+        with chart_col2:
+
+            st.subheader(
+                "🌍 Revenue by Country"
+            )
+
+
+            if not countries.empty:
+
+                st.bar_chart(
+                    countries.set_index(
+                        "Country"
+                    )[["Revenue"]]
+                )
+
+
+                with st.expander(
+                    "View Country Details"
+                ):
+
+                    st.dataframe(
+                        countries,
+                        hide_index=True,
+                        width="stretch",
+                    )
+
+            else:
+
+                st.info(
+                    "Country information was not detected."
+                )
+
+
+        # ====================================================
+        # TOP CUSTOMERS
+        # ====================================================
+
+
+        st.subheader(
+            "👤 Top Customers"
+        )
+
+
+        if not customers.empty:
+
+            st.dataframe(
+                customers,
+                hide_index=True,
+                width="stretch",
+            )
+
+        else:
+
+            st.info(
+                "Customer information was not detected."
+            )
+
+
+        # ====================================================
+        # CUSTOMER SEGMENTATION
+        # ====================================================
+
+
+        st.divider()
+
+
+        st.header(
+            "👥 Customer Segmentation"
+        )
+
+
+        st.write(
+            "Automatically group customers according to "
+            "their purchasing behaviour using RFM features "
+            "and K-Means clustering."
+        )
+
+
+        if not customer_segment_summary.empty:
+
+            # ------------------------------------------------
+            # SEGMENT KPIs
+            # ------------------------------------------------
+
+            segment_kpi1, segment_kpi2, segment_kpi3, segment_kpi4 = (
+                st.columns(4)
+            )
+
+
+            segment_names = (
+                customer_segment_summary[
+                    "Segment"
+                ]
+                .tolist()
+            )
+
+
+            def get_segment_count(
+                segment_name
+            ):
+
+                matching = (
+                    customer_segment_summary[
+                        customer_segment_summary[
+                            "Segment"
+                        ]
+                        == segment_name
+                    ]
+                )
+
+                if matching.empty:
+
+                    return 0
+
+                return int(
+                    matching.iloc[0][
+                        "Customers"
+                    ]
+                )
+
+
+            with segment_kpi1:
+
+                st.metric(
+                    "👑 VIP / Loyal",
+                    f"{get_segment_count('VIP / Loyal Customers'):,}",
+                )
+
+
+            with segment_kpi2:
+
+                st.metric(
+                    "💎 Potential High Value",
+                    f"{get_segment_count('Potential High Value'):,}",
+                )
+
+
+            with segment_kpi3:
+
+                st.metric(
+                    "👤 Regular",
+                    f"{get_segment_count('Regular Customers'):,}",
+                )
+
+
+            with segment_kpi4:
+
+                st.metric(
+                    "⚠️ At Risk / Inactive",
+                    f"{get_segment_count('At Risk / Inactive'):,}",
+                )
+
+
+            # ------------------------------------------------
+            # SEGMENT SUMMARY
+            # ------------------------------------------------
+
+            st.subheader(
+                "📊 Segment Performance"
+            )
+
+
+            display_segment_summary = (
+                customer_segment_summary[
+                    [
+                        "Segment",
+                        "Customers",
+                        "Revenue",
+                        "Revenue_Percentage",
+                        "Average_Recency",
+                        "Average_Frequency",
+                        "Average_Monetary",
+                    ]
+                ]
+                .copy()
+            )
+
+
+            display_segment_summary = (
+                display_segment_summary.rename(
+                    columns={
+                        "Revenue": "Revenue",
+                        "Revenue_Percentage": "Revenue %",
+                        "Average_Recency": "Avg. Recency",
+                        "Average_Frequency": "Avg. Frequency",
+                        "Average_Monetary": "Avg. Monetary",
+                    }
+                )
+            )
+
+
+            st.dataframe(
+                display_segment_summary,
+                hide_index=True,
+                width="stretch",
+            )
+
+
+            # ------------------------------------------------
+            # SEGMENT CHARTS
+            # ------------------------------------------------
+
+            segment_chart_col1, segment_chart_col2 = (
+                st.columns(2)
+            )
+
+
+            with segment_chart_col1:
+
+                st.subheader(
+                    "👥 Customers by Segment"
+                )
+
+
+                customer_chart = (
+                    customer_segment_summary
+                    .set_index("Segment")
+                    [["Customers"]]
+                )
+
+
+                st.bar_chart(
+                    customer_chart
+                )
+
+
+            with segment_chart_col2:
+
+                st.subheader(
+                    "💰 Revenue by Segment"
+                )
+
+
+                revenue_chart = (
+                    customer_segment_summary
+                    .set_index("Segment")
+                    [["Revenue"]]
+                )
+
+
+                st.bar_chart(
+                    revenue_chart
+                )
+
+
+            # ------------------------------------------------
+            # BUSINESS INSIGHTS
+            # ------------------------------------------------
+
+            st.subheader(
+                "💡 Customer Segment Insights"
+            )
+
+
+            if customer_segment_insights:
+
+                for insight in (
+                    customer_segment_insights
+                ):
+
+                    st.info(
+                        f"**{insight['Segment']}**\n\n"
+                        f"{insight['Insight']}"
+                    )
+
+            else:
+
+                st.info(
+                    "No segment-specific insights were generated."
+                )
+
+
+            # ------------------------------------------------
+            # CUSTOMER LEVEL DATA
+            # ------------------------------------------------
+
+            with st.expander(
+                "🔍 View Customer-Level Segmentation"
+            ):
+
+                if not segmented_customers.empty:
+
+                    customer_segment_display = (
+                        segmented_customers[
+                            [
+                                "Customer ID",
+                                "Recency",
+                                "Frequency",
+                                "Monetary",
+                                "Cluster",
+                                "Segment",
+                            ]
+                        ]
+                        .copy()
+                    )
+
+
+                    st.dataframe(
+                        customer_segment_display,
+                        hide_index=True,
+                        width="stretch",
+                    )
+
+                else:
+
+                    st.info(
+                        "Customer-level segmentation data "
+                        "is not available."
+                    )
+
+
+        else:
+
+            st.warning(
+                "⚠️ Customer segmentation could not be generated. "
+                "A valid Customer ID, Date and transaction structure "
+                "are required for this analysis."
+            )
+
+        # ====================================================
+        # SALES FORECASTING
+        # ====================================================
+
+        st.header(
+            "📈 Sales Forecasting"
+        )
+
+        st.write(
+            "Estimate future monthly revenue based on "
+            "historical sales patterns."
+        )
+
+        if (
+            sales_forecast is not None
+            and not sales_forecast.empty
+        ):
+
+            # ------------------------------------------------
+            # FORECAST SUMMARY
+            # ------------------------------------------------
+
+            forecast_col1, forecast_col2, forecast_col3 = (
+                st.columns(3)
+            )
+
+            with forecast_col1:
+                st.metric(
+                    "Forecast Period",
+                    f"{sales_forecast_summary.get('forecast_periods', 0)} months"
+                )
+
+            with forecast_col2:
+                st.metric(
+                    "Total Forecast Revenue",
+                    f"{sales_forecast_summary.get('total_forecast', 0):,.2f}"
+                )
+
+            with forecast_col3:
+                st.metric(
+                    "Average Monthly Forecast",
+                    f"{sales_forecast_summary.get('average_monthly_forecast', 0):,.2f}"
+                )
+            # ------------------------------------------------
+            # HISTORICAL VS FORECAST CHART
+            # ------------------------------------------------
+
+            st.subheader(
+                "📊 Historical vs Forecast Revenue"
+            )
+
+            historical_chart = monthly[
+                ["Month", "Revenue"]
+            ].copy()
+
+            historical_chart = historical_chart.rename(
+                columns={
+                    "Revenue": "Historical Revenue"
+                }
+            )
+
+            forecast_chart = sales_forecast[
+                ["Month", "Forecast Revenue"]
+            ].copy()
+
+            historical_chart["Month"] = pd.to_datetime(
+                historical_chart["Month"],
+                errors="coerce"
+            )
+
+            forecast_chart["Month"] = pd.to_datetime(
+                forecast_chart["Month"],
+                errors="coerce"
+            )
+
+            combined_forecast_chart = pd.merge(
+                historical_chart,
+                forecast_chart,
+                on="Month",
+                how="outer",
+            ).sort_values(
+                "Month"
+            )
+
+            st.line_chart(
+                combined_forecast_chart.set_index(
+                    "Month"
+                )
+            )
+
+            # ------------------------------------------------
+            # FORECAST TABLE
+            # ------------------------------------------------
+
+            st.subheader(
+                "📅 Forecasted Monthly Revenue"
+            )
+
+            display_forecast = sales_forecast.copy()
+
+            if "Month" in display_forecast.columns:
+                display_forecast["Month"] = (
+                    pd.to_datetime(
+                        display_forecast["Month"],
+                        errors="coerce"
+                    ).dt.strftime("%b %Y")
+                )
+
+            if "Forecast Revenue" in display_forecast.columns:
+                display_forecast["Forecast Revenue"] = (
+                    display_forecast["Forecast Revenue"].round(2)
+                )
+
+            st.dataframe(
+                display_forecast,
+                hide_index=True,
+                width="stretch",
+            )
+
+            # ------------------------------------------------
+            # FORECAST INSIGHT
+            # ------------------------------------------------
+
+            st.subheader(
+                "💡 Forecast Business Insight"
+            )
+
+            if isinstance(
+                sales_forecast_insights,
+                dict
+            ):
+                st.info(
+                    sales_forecast_insights.get(
+                        "message",
+                        "No forecast insight is available."
+                    )
                 )
             else:
-                selected_customer_id = int(
-                    numeric_customer_id
+                st.info(
+                    "Forecast generated successfully from "
+                    "historical revenue patterns."
                 )
-        except (
-            ValueError,
-            OverflowError
-        ):
-            st.error(
-                "❌ Invalid Customer ID. "
-                "Please enter a numeric Customer ID "
-                "such as 18235."
-            )
-# ============================================================
-# CUSTOMER RESULT
-# ============================================================
-if selected_customer_id is not None:
-    # --------------------------------------------------------
-    # CHECK WHETHER CUSTOMER EXISTS
-    # --------------------------------------------------------
-    if (
-        selected_customer_id
-        not in retail_customer_id_set
-    ):
-        st.error(
-            f"❌ Customer ID "
-            f"**{selected_customer_id}** "
-            "was not found in the customer database."
-        )
-    # --------------------------------------------------------
-    # EXISTS BUT NO RECOMMENDATION PROFILE
-    # --------------------------------------------------------
-    elif (
-        selected_customer_id
-        not in recommendation_customer_id_set
-    ):
-        st.warning(
-            f"⚠️ Customer ID "
-            f"**{selected_customer_id}** "
-            "exists in the sales dataset, "
-            "but a recommendation profile "
-            "is not currently available."
-        )
-    # --------------------------------------------------------
-    # VALID CUSTOMER
-    # --------------------------------------------------------
-    else:
-        customer_record = (
-            customer_lookup[
-                customer_lookup[
-                    "Customer_ID_Clean"
-                ]
-                == selected_customer_id
-            ]
-            .iloc[0]
-        )
-        customer_segment = (
-            customer_record["Segment"]
-        )
-        # ----------------------------------------------------
-        # SUCCESS
-        # ----------------------------------------------------
-        st.success(
-            f"✅ Customer ID "
-            f"**{selected_customer_id}** "
-            "verified successfully."
-        )
-        st.markdown(
-            f"""
-            ### 👤 Customer {selected_customer_id}
-            **Customer Segment:** \`{customer_segment}\`
-            **Status:** ✅ Customer ID Verified
-            """
-        )
-        # ----------------------------------------------------
-        # PERSONALIZED RECOMMENDATIONS
-        # ----------------------------------------------------
-        st.markdown(
-            "### 🛍️ Personalized Product Recommendations"
-        )
-        recommendation_columns = [
-            "Recommendation 1",
-            "Recommendation 2",
-            "Recommendation 3",
-            "Recommendation 4",
-            "Recommendation 5"
-        ]
-        customer_products = []
-        for column in recommendation_columns:
-            if column in customer_record.index:
-                product = (
-                    customer_record[column]
-                )
-                if (
-                    pd.notna(product)
-                    and str(product).strip() != ""
-                    and str(product)
-                    != "No recommendation"
-                ):
-                    customer_products.append(
-                        str(product)
-                    )
-        if customer_products:
-            recommendation_cols = st.columns(
-                len(customer_products)
-            )
-            for index, product in enumerate(
-                customer_products
+
+            # ------------------------------------------------
+            # FORECAST ACCURACY
+            # ------------------------------------------------
+
+            with st.expander(
+                "📐 View Forecast Model Accuracy"
             ):
-                with recommendation_cols[index]:
-                    st.info(
-                        f"🛍️ **Recommendation "
-                        f"{index + 1}**\n\n"
-                        f"{product}"
+
+                mae = sales_forecast_accuracy.get(
+                    "mae"
+                )
+
+                rmse = sales_forecast_accuracy.get(
+                    "rmse"
+                )
+
+                accuracy_col1, accuracy_col2 = (
+                    st.columns(2)
+                )
+
+                with accuracy_col1:
+                    st.metric(
+                        "MAE",
+                        (
+                            f"{mae:,.2f}"
+                            if mae is not None
+                            else "N/A"
+                        )
                     )
-        else:
-            st.warning(
-                "⚠️ This customer exists, "
-                "but no new product recommendations "
-                "are currently available."
+
+                with accuracy_col2:
+                    st.metric(
+                        "RMSE",
+                        (
+                            f"{rmse:,.2f}"
+                            if rmse is not None
+                            else "N/A"
+                        )
+                    )
+
+                st.caption(
+                    "MAE and RMSE evaluate the forecast model "
+                    "using a simple historical holdout approach. "
+                    "Lower values generally indicate smaller "
+                    "prediction errors."
+                )
+
+            st.caption(
+                "⚠️ Forecasts are estimates based on historical "
+                "patterns and should be used as decision support, "
+                "not as guaranteed future results."
             )
-        # ----------------------------------------------------
-        # CUSTOMER STRATEGY
-        # ----------------------------------------------------
-        st.markdown(
-            "### 🎯 Recommended Customer Strategy"
+
+        else:
+
+            st.warning(
+                "⚠️ Sales forecasting could not be generated. "
+                "At least two valid historical months are required."
+            )
+
+        # ====================================================
+        # COMPLETION
+        # ====================================================
+
+        st.divider()
+
+        st.success(
+            "🎉 Business analysis completed successfully!"
         )
-        segment_lower = (
-            str(customer_segment)
-            .lower()
+
+
+        # ====================================================
+        # INTELLIGENCE MODULES
+        # ====================================================
+
+        st.header(
+            "🚀 Intelligence Modules"
         )
+
+        intelligence_col1, intelligence_col2 = (
+            st.columns(2)
+        )
+
+        # ====================================================
+        # CUSTOMER SEGMENTATION MODULE
+        # ====================================================
+
+        with intelligence_col1:
+
+            with st.container(border=True):
+
+                st.markdown(
+                    "### 👥 Customer Segmentation"
+                )
+
+                if (
+                    customer_segment_summary is not None
+                    and not customer_segment_summary.empty
+                ):
+
+                    total_segmented = len(
+                        segmented_customers
+                    )
+
+                    st.success(
+                        f"✅ {total_segmented:,} "
+                        "customers segmented"
+                    )
+
+                    st.write(
+                        "Customers are grouped into "
+                        "behaviour-based segments using "
+                        "RFM analysis and K-Means clustering."
+                    )
+
+                else:
+
+                    st.warning(
+                        "Customer segmentation is not available."
+                    )
+
+           
+        # ====================================================
+        # FORECASTING + AI INSIGHTS
+        # ====================================================
+
+        with intelligence_col2:
+
+            with st.container(border=True):
+
+                st.markdown(
+                    "### 🔮 Sales Forecasting"
+                )
+
+                if (
+                    sales_forecast is not None
+                    and not sales_forecast.empty
+                ):
+
+                    st.success(
+                        "✅ Sales forecast generated"
+                    )
+
+                    st.write(
+                        f"Forecast generated for "
+                        f"{len(sales_forecast)} future months."
+                    )
+
+                else:
+
+                    st.warning(
+                        "Sales forecasting is not available."
+                    )
+
+            with st.container(border=True):
+
+                st.markdown(
+                    "### 🤖 AI Business Insights"
+                )
+
+                st.write(
+                    "Turn analytical results into "
+                    "actionable business decisions."
+                )
+
+        if ai_business_insights:
+
+            st.success("🤖 AI Business Insights generated")
+
+            if isinstance(ai_business_insights, dict):
+
+                for title, insight in ai_business_insights.items():
+
+                    if insight:
+                        st.info(
+                            f"💡 **{str(title).replace('_', ' ').title()}**\n\n"
+                            f"{insight}"
+                        )
+
+            elif isinstance(ai_business_insights, list):
+
+                for insight in ai_business_insights:
+
+                    if insight:
+                        st.info(f"💡 {insight}")
+
+            else:
+
+                st.info(
+                    f"💡 {ai_business_insights}"
+                )
+
+        else:
+
+            st.warning(
+                "⚠️ No AI business insights were generated for this dataset."
+            )    
+        # =================================================
+        # RECOMMENDATIONS MODULE
+        # =================================================
+
+        with st.container(border=True):
+
+            st.markdown(
+                "### 🛍️ Recommendations"
+            )
+
+            st.write(
+                "Discover product, customer, and "
+                "cross-selling opportunities."
+            )
+
+            # -------------------------------------------------
+            # GET RECOMMENDATION DATA DIRECTLY
+            # -------------------------------------------------
+
+            recommendation_data = (
+                st.session_state.analysis_results
+                if st.session_state.get(
+                    "analysis_results"
+                )
+                else {}
+            )
+
+
+            customer_recommendation_results = (
+                recommendation_data.get(
+                    "customer_recommendations",
+                    pd.DataFrame(),
+                )
+            )
+
+            product_pair_recommendations = (
+                recommendation_data.get(
+                    "product_pair_recommendations",
+                    pd.DataFrame(),
+                )
+            )
+
+            product_strategy_results = (
+                recommendation_data.get(
+                    "product_strategy_recommendations",
+                    [],
+                )
+            )
+
+            recommendation_results_summary = (
+                recommendation_data.get(
+                    "recommendation_summary",
+                    {},
+                )
+            )
+
+            # -------------------------------------------------
+            # SAFE COUNTS
+            # -------------------------------------------------
+
+            if isinstance(
+                customer_recommendation_results,
+                pd.DataFrame
+            ):
+                total_customer_recommendations = len(
+                    customer_recommendation_results
+                )
+            elif isinstance(
+                customer_recommendation_results,
+                (list, tuple)
+            ):
+                total_customer_recommendations = len(
+                    customer_recommendation_results
+                )
+            else:
+                total_customer_recommendations = 0
+
+            if isinstance(
+                product_pair_recommendations,
+                pd.DataFrame
+            ):
+                total_product_pairs = len(
+                    product_pair_recommendations
+                )
+            elif isinstance(
+                product_pair_recommendations,
+                (list, tuple)
+            ):
+                total_product_pairs = len(
+                    product_pair_recommendations
+                )
+            else:
+                total_product_pairs = 0
+
+            if isinstance(
+                product_strategy_results,
+                (list, tuple)
+            ):
+                total_business_recommendations = len(
+                    product_strategy_results
+                )
+            elif isinstance(
+                product_strategy_results,
+                pd.DataFrame
+            ):
+                total_business_recommendations = len(
+                    product_strategy_results
+                )
+            else:
+                total_business_recommendations = 0
+
+            # -------------------------------------------------
+            # SUMMARY CARDS
+            # -------------------------------------------------
+
+            summary_col1, summary_col2, summary_col3 = (
+                st.columns(3)
+            )
+
+            with summary_col1:
+
+                st.metric(
+                    "Customer Recommendations",
+                    f"{total_customer_recommendations:,}",
+                )
+
+            with summary_col2:
+
+                st.metric(
+                    "Product Pairs",
+                    f"{total_product_pairs:,}",
+                )
+
+            with summary_col3:
+
+                st.metric(
+                    "Business Recommendations",
+                    f"{total_business_recommendations:,}",
+                )
+
+            # -------------------------------------------------
+            # CUSTOMER RECOMMENDATIONS
+            # -------------------------------------------------
+
+            if (
+                isinstance(
+                    customer_recommendation_results,
+                    pd.DataFrame,
+                )
+                and not customer_recommendation_results.empty
+            ):
+
+                st.markdown(
+                    "#### 👤 Customer Recommendations"
+                )
+
+                st.dataframe(
+                    customer_recommendation_results.head(100),
+                    hide_index=True,
+                    width="stretch",
+                )
+
+            # -------------------------------------------------
+            # FREQUENTLY BOUGHT TOGETHER
+            # -------------------------------------------------
+
+            if (
+                isinstance(
+                    product_pair_recommendations,
+                    pd.DataFrame,
+                )
+                and not product_pair_recommendations.empty
+            ):
+
+                st.markdown(
+                    "#### 🔗 Frequently Bought Together"
+                )
+
+                st.dataframe(
+                    product_pair_recommendations,
+                    hide_index=True,
+                    width="stretch",
+                )
+
+            # -------------------------------------------------
+            # PRODUCT STRATEGY
+            # -------------------------------------------------
+
+            if (
+                isinstance(
+                    product_strategy_results,
+                    (list, tuple),
+                )
+                and len(product_strategy_results) > 0
+            ):
+
+                st.markdown(
+                    "#### 📦 Product Strategy"
+                )
+
+                for recommendation in (
+                    product_strategy_results
+                ):
+
+                    st.info(
+                        f"💡 {recommendation}"
+                    )
+
+            # -------------------------------------------------
+            # SUMMARY / EMPTY STATE
+            # -------------------------------------------------
+
+            if (
+                total_customer_recommendations == 0
+                and total_product_pairs == 0
+                and total_business_recommendations == 0
+            ):
+
+                st.warning(
+                    "No recommendation results were "
+                    "generated for this dataset."
+                )
+
+            # ---------------------------------------------
+            # RECOMMENDATION SUMMARY
+            # ---------------------------------------------
+
+            if isinstance(
+                recommendation_results_summary,
+                dict
+            ):
+
+                total_customer_recommendations = (
+                    len(customer_recommendation_results)
+                    if hasattr(
+                        customer_recommendation_results,
+                        "__len__"
+                    )
+                    else 0
+                )
+
+                total_product_pairs = (
+                    len(product_pair_recommendations)
+                    if hasattr(
+                        product_pair_recommendations,
+                        "__len__"
+                    )
+                    else 0
+                )
+
+                summary_col1, summary_col2 = (
+                    st.columns(2)
+                )
+
+
+            
+        # ====================================================
+        # ANALYSIS PERFORMANCE
+        # ====================================================
+
         if (
-            "vip" in segment_lower
-            or "loyal" in segment_lower
+            st.session_state.analysis_seconds
+            is not None
         ):
-            st.success(
-                "👑 **VIP / Loyal Customer:** "
-                "Focus on loyalty rewards, premium "
-                "offers, exclusive products and "
-                "early access."
+
+            st.caption(
+                "⚡ Complete analysis processing time: "
+                f"{st.session_state.analysis_seconds:.2f} seconds"
             )
-        elif (
-            "potential high"
-            in segment_lower
-        ):
-            st.info(
-                "💎 **Potential High Value Customer:** "
-                "Use personalized cross-selling and "
-                "targeted offers to increase purchase "
-                "frequency and move the customer toward "
-                "VIP status."
-            )
-        elif "regular" in segment_lower:
-            st.info(
-                "👤 **Regular Customer:** "
-                "Use cross-selling, product bundles "
-                "and personalized recommendations "
-                "to increase order frequency."
-            )
-        elif (
-            "at risk" in segment_lower
-            or "inactive" in segment_lower
-        ):
-            st.warning(
-                "⚠️ **At Risk / Inactive Customer:** "
-                "Consider a win-back campaign, "
-                "personalized discounts and "
-                "re-engagement offers."
-            )
-        else:
-            st.info(
-                "📊 Continue monitoring this "
-                "customer's purchase behavior."
-            )
+
+
 # ============================================================
-# CUSTOMER LOOKUP HELP
+# ERROR HANDLING
 # ============================================================
-with st.expander(
-    "💡 How to use Customer ID Lookup"
-):
-    st.markdown(
-        """
-        ### Option 1 — Select Existing Customer
-        Choose:
-        **📋 Select from Customer IDs**
-        Then select a Customer ID from the dropdown.
-        Example:
-        \`18235\`
-        ### Option 2 — Enter Customer Manually
-        Choose:
-        **⌨️ Enter Customer ID manually**
-        Then type:
-        \`18235\`
-        ### Wrong Customer ID
-        Enter:
-        \`99999999\`
-        The system will show:
-        ❌ Customer ID was not found.
-        ### Invalid Customer ID
-        Enter:
-        \`ABC123\`
-        The system will show:
-        ❌ Invalid Customer ID.
-        ### Decimal ID
-        Enter:
-        \`18235.5\`
-        The system will show:
-        ❌ Customer IDs must be whole numbers.
-        """
+
+
+except Exception as exc:
+
+    st.error(
+        "❌ Unable to process the dataset."
     )
-# ============================================================
-# PRODUCT STRATEGY RECOMMENDATIONS
-# ============================================================
-st.subheader(
-    "🤖 Product Strategy Recommendations"
-)
-for index, recommendation in enumerate(
-    recommendation_results[
-        "business_recommendations"
-    ],
-    start=1
-):
-    st.markdown(
-        f"**{index}.** {recommendation}"
-    )
-# ============================================================
-# RECOMMENDATION ENGINE SUMMARY
-# ============================================================
-st.subheader(
-    "📊 Recommendation Engine Summary"
-)
-summary1, summary2, summary3 = st.columns(3)
-with summary1:
-    st.metric(
-        "Top Products",
-        f"{len(popular_products):,}"
-    )
-with summary2:
-    st.metric(
-        "Product Pairs Detected",
-        f"{len(product_pairs):,}"
-    )
-with summary3:
-    st.metric(
-        "Customers with Recommendations",
-        f"{len(customer_lookup):,}"
-    )
-# ============================================================
-# FOOTER
-# ============================================================
-st.divider()
-st.caption(
-    "AI Business Intelligence | "
-    "Python • Pandas • Plotly • Scikit-learn • Streamlit"
-)
-st.caption(
-    f"💱 Monetary values displayed in {currency_code}. "
-    "Underlying dataset is maintained in GBP."
-)
+
+
+    with st.expander(
+        "View Technical Details"
+    ):
+
+        st.exception(
+            exc
+        )
