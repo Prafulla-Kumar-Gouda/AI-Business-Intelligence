@@ -43,6 +43,28 @@ recommendations, and interactive visualization into a single dashboard.
 - Currency support
 - Interactive Streamlit dashboard
 
+## 🖥️ Dashboard Preview
+
+### Main Dashboard
+
+![Main Dashboard](dashboard.png)
+
+### Business Analytics
+
+![Business Analytics](analytics.png)
+
+### Customer Segmentation
+
+![Customer Segmentation](Customer%20Segmentation.png)
+
+### Sales Forecasting
+
+![Sales Forecasting](Sales%20Forecasting.png)
+
+### AI Business Insights
+
+![AI Business Insights](Business%20analytics.png)
+
 ## 🧠 Intelligence Modules
 
 ### 1. Customer Segmentation
